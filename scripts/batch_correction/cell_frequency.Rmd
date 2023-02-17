@@ -1,0 +1,119 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+## Asemble clinical data and Raw cell frequency data
+## Clinical data is extracted using codebase.R
+```{r}
+## Read live_cell_percentages datasets
+live_cell_percentages_2020 <- readr::read_tsv(paste0(base_path_raw, "2020LD_live_cell_percentages.tsv")) %>%
+  dplyr::left_join(., clinical_data) %>%
+  dplyr::filter(Timepoint <= 120)
+
+live_cell_percentages_2021 <- readr::read_tsv(paste0(base_path_raw, "2021LD_live_cell_percentages.tsv")) %>%
+  dplyr::left_join(., clinical_data) %>%
+  filter(Timepoint <= 120)
+
+```
+## Identify Features with coefficient of variation> 30%
+```{r}
+live_cell_percentages_2020_CV <- live_cell_percentages_2020 %>%
+  group_by(cell_type_name) %>%
+     summarise(mean = mean(percent_live_cell), 
+               median = median(percent_live_cell), 
+               cv= cmstatr::cv(percent_live_cell, na.rm = T)) %>%
+  filter(cv >= 0.3)
+
+## Result:: Gene list filtered to 24 cell types for 2020 dataset
+
+live_cell_percentages_2021_CV <- live_cell_percentages_2021 %>%
+  group_by(cell_type_name) %>%
+     summarise(mean = mean(percent_live_cell), 
+               median = median(percent_live_cell), 
+               cv= cmstatr::cv(percent_live_cell, na.rm = T)) %>%
+  filter(cv >= 0.3)
+
+## Result:: Gene list filtered to 47  cell types for 2021 dataset
+
+## Overlap between two datasets is 20 cell types
+
+```
+
+```{r}
+live_cell_percentages_2020_selected = live_cell_percentages_2020 
+
+live_cell_percentages_2021_selected = live_cell_percentages_2021 %>% 
+  filter(cell_type_name %in% live_cell_percentages_2021_CV$cell_type_name) %>%
+  filter(cell_type_name %in%  unique(live_cell_percentages_2020_selected$cell_type_name))
+
+live_cell_percentages_2020_selected <- live_cell_percentages_2020_selected %>%
+  filter(cell_type_name %in%  unique(live_cell_percentages_2021_selected$cell_type_name))
+
+live_cell_percentages_selected <- rbind(live_cell_percentages_2020_selected, live_cell_percentages_2021_selected)
+
+```
+
+## Identify batch effects
+```{r}
+
+live_cell_percentages_selected.df <- live_cell_percentages_selected %>%
+  dplyr::select(specimen_id, cell_type_name, percent_live_cell) %>%
+  pivot_wider(names_from = specimen_id, values_from = percent_live_cell) 
+
+live_cell_percentages_selected.matrix <-  live_cell_percentages_selected.df %>%
+  column_to_rownames("cell_type_name") %>%
+  as.matrix()
+
+clinical_data_selected = clinical_data %>%
+  filter(specimen_id %in% colnames(live_cell_percentages_selected.matrix))
+  
+batch = clinical_data_selected$dataset
+
+setwd("/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/scripts/batch_correction/batch_qc/live_cell_percentages/unprocessed")
+## Run BatcQC
+batchQC(live_cell_percentages_selected.matrix, 
+        batch= batch,
+        report_file="batchqc_report_live_cell_percentages_2020_2021.html", report_dir=".", 
+        report_option_binary="111111111",
+        view_report=FALSE, 
+        interactive=FALSE, 
+        batchqc_output=TRUE
+        )
+```
+
+
+### Run ComBat on live_cell_percentages data
+```{r}
+live_cell_percentages_adjust<-ComBat(dat=live_cell_percentages_selected.matrix, 
+                     batch=batch)
+
+live_cell_percentages_adjust_df <- live_cell_percentages_adjust %>%
+  as.data.frame() %>%
+  rownames_to_column("cell_type_name")
+
+```
+
+
+```{r}
+setwd("/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/scripts/batch_correction/batch_qc/live_cell_percentages/batch_corrected")
+
+## Run BatcQC
+batchQC(live_cell_percentages_adjust, 
+        batch= batch,
+        report_file="batchqc_report_live_cell_percentages_2020_2021_batch_corrected.html", report_dir=".", 
+        report_option_binary="111111111",
+        view_report=FALSE, 
+        interactive=FALSE, 
+        batchqc_output=TRUE
+        )
+```
+## Save dataframe 
+```{r}
+write_tsv(live_cell_percentages_adjust_df, 
+          file = paste0(base_path_processed, "live_cell_percentages_batch_corrected.tsv"))
+
+write_tsv(live_cell_percentages_selected.df, 
+          file = paste0(base_path_pre_processed, "live_cell_percentages_batch_not_corrected.tsv"))
+```
+

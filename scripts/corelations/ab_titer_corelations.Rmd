@@ -1,0 +1,104 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+```{r}
+base_path_raw = "/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/data/raw/"
+base_path_pre_processed = "/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/data/pre_processed/"
+base_path_processed = "/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/data/processed/"
+```
+
+```{r}
+abtiter_pre_df <-  readr::read_tsv(paste0(base_path_pre_processed, "abtiter_batch_not_corrected.tsv"))
+
+abtiter_pre_mat <-  abtiter_pre_df %>%
+  column_to_rownames("isotype_antigen") 
+
+abtiter_post_df <-  readr::read_tsv(paste0(base_path_processed, "abtiter_batch_corrected.tsv"))
+
+abtiter_post_mat <-  abtiter_post_df %>%
+  column_to_rownames("isotype_antigen") 
+
+clinical_data_abtiter <- clinical_data %>%
+  filter(specimen_id %in% colnames(abtiter_post_mat)) %>%
+  distinct()
+
+clinical_data_abtiter_2020 <- clinical_data_abtiter %>% filter(dataset == "2020_dataset")
+clinical_data_abtiter_2021 <- clinical_data_abtiter %>% filter(dataset == "2021_dataset")
+cols_2021 <- intersect(colnames(abtiter_post_mat), clinical_data_abtiter_2021$specimen_id)
+
+abtiter_post_mat_2020 <- abtiter_post_mat[clinical_data_abtiter_2020$specimen_id]  %>% as.matrix()
+abtiter_post_mat_2021 <- abtiter_post_mat[cols_2021] %>% as.matrix()
+
+abtiter_pre_mat_2020 <- abtiter_pre_mat[clinical_data_abtiter_2020$specimen_id]  %>% as.matrix()
+abtiter_pre_mat_2021 <- abtiter_pre_mat[cols_2021] %>% as.matrix()
+
+
+```
+
+## Cumulative distribution
+### Kolmogorov-Smirnoff test comparing each isotype_antigen dist. from 2020 v 2021
+```{r}
+k.s<-data.frame(matrix(nrow=nrow(abtiter_post_mat_2020),ncol=3))
+rownames(k.s)<-rownames(abtiter_post_mat_2020)
+colnames(k.s)<-c('mean_20','mean_21','ks_test')
+
+for (i in 1:nrow(abtiter_post_mat_2020)){
+    ia_abtiter_post_mat_2020 <-abtiter_post_mat_2020[i,]
+    ia_abtiter_post_mat_2021<-abtiter_post_mat_2021[i,]
+    k.s[i,"ks_test"]<-ks.test(abtiter_post_mat_2020, abtiter_post_mat_2021)$p.value
+    k.s[i,'mean_20']<-mean(ia_abtiter_post_mat_2020)
+    k.s[i,'mean_21']<-mean(ia_abtiter_post_mat_2021)
+}
+
+k.s$mean_20<-round(k.s$mean_20,3)
+k.s$mean_21<-round(k.s$mean_21,3)
+k.s$ks_test<-signif(k.s$ks_test,digits=3)
+k.s<-k.s[order(nrow(k.s):1),]
+
+k.s_post <- k.s
+
+print(k.s_post )
+```
+
+### Visualize different distributions
+```{r}
+abtiter_post_df_long = abtiter_post_df %>%
+  pivot_longer(!isotype_antigen, names_to = "specimen_id", values_to = "MFI_normalised") %>%
+  mutate(specimen_id = as.double(specimen_id)) %>%
+  left_join(clinical_data) 
+  
+
+my_isotypes = c("IgG_","IgG1","IgG2","IgG3","IgG4")
+
+for(my_isotype in my_isotypes){
+  
+  abtiter_post_df_long_isotype = abtiter_post_df_long %>% filter(substr(isotype_antigen, 1, 4) == my_isotype)
+  
+  plot = ggplot(abtiter_post_df_long_isotype, aes(x = MFI_normalised, y = isotype_antigen)) +
+    geom_density_ridges(aes(x=MFI_normalised, y=isotype_antigen,
+                        group = interaction(dataset,isotype_antigen),
+                        fill=dataset,
+                        #alpha=0.5
+                        )) +
+    theme_ridges() +
+    facet_wrap(~isotype_antigen, scales = "free")
+  
+  plot(plot)
+
+}
+```
+
+## Corelations
+```{r}
+
+  
+```
+## Cumulative Distribution
+```{r}
+abtiter_post_df_long_KS <- abtiter_post_df_long %>%
+  group_by()
+  
+  
+```
+

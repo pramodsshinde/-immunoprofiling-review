@@ -1,0 +1,94 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+base_path_raw = "/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/data/raw/"
+base_path_pre_processed = "/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/data/pre_processed/"
+base_path_processed = "/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/data/processed/"
+```
+
+## Asemble clinical data and Raw AB titer data
+```{r}
+## Read Ab titer datasets
+
+abtiter_2020 <- readr::read_tsv(paste0(base_path_raw, "2020LD_ab_titer.tsv")) %>%
+  dplyr::left_join(., clinical_data) %>%
+  dplyr::filter(isotype != "IgE") %>%
+  dplyr::mutate(isotype_antigen = paste0(isotype, "_", antigen))  %>%
+  dplyr::filter(Timepoint <= 120)
+
+abtiter_2021 <- readr::read_tsv(paste0(base_path_raw, "2021LD_ab_titer.tsv")) %>%
+  dplyr::left_join(., clinical_data) %>%
+  mutate(isotype_antigen = paste0(isotype, "_", antigen)) %>%
+  filter(Timepoint <= 120)
+
+```
+
+## Identify Features with coefficient of variation > 30%
+```{r}
+abtiter_2020_CV <- abtiter_2020 %>%
+  filter(antigen %in% unique(abtiter_2021$antigen)) %>%
+  group_by(isotype_antigen) %>%
+     summarise(cv= cmstatr::cv(MFI_normalised)) %>%
+  filter(cv >= 0.3)
+
+abtiter_2021_CV <- abtiter_2021 %>%
+  filter(antigen %in% unique(abtiter_2020$antigen)) %>%
+  group_by(isotype_antigen) %>%
+     summarise(cv= cmstatr::cv(MFI_normalised)) %>%
+  filter(cv >= 0.3)
+
+abtiter_2020_selected = abtiter_2020 %>% 
+  filter(isotype_antigen %in% abtiter_2020_CV$isotype_antigen)
+
+abtiter_2021_selected = abtiter_2021 %>% 
+  filter(isotype_antigen %in% abtiter_2021_CV$isotype_antigen) %>%
+  filter(isotype_antigen %in%  unique(abtiter_2020_selected$isotype_antigen))
+
+abtiter_2020_selected <- abtiter_2020_selected %>%
+  filter(isotype_antigen %in%  unique(abtiter_2021_selected$isotype_antigen))
+
+abtiter_selected <- rbind(abtiter_2020_selected, abtiter_2021_selected)
+
+```
+
+## Identify batch effects
+```{r}
+abtiter_selected.df <- abtiter_selected %>%
+  dplyr::select(specimen_id, isotype_antigen, MFI_normalised) %>%
+  pivot_wider(names_from = specimen_id, values_from = MFI_normalised) 
+
+abtiter_selected.matrix <-  abtiter_selected.df %>%
+  column_to_rownames("isotype_antigen") %>%
+  as.matrix()
+
+clinical_data_selected = clinical_data %>%
+  filter(specimen_id %in% colnames(abtiter_selected.matrix))
+  
+batch = clinical_data_selected$dataset
+
+setwd("/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/scripts/batch_correction/batch_qc/ab_titer/")
+## Run BatcQC
+batchQC(abtiter_selected.matrix, 
+        batch= batch,
+        report_file="batchqc_report_Abtiters_2020_2021.html", report_dir=".", 
+        report_option_binary="111111111",
+        view_report=FALSE, 
+        interactive=FALSE, 
+        batchqc_output=TRUE
+        )
+```
+
+## Evaluation of batchQC output for abtiters shows no/few batch effects, so no batch corrections is needed.
+## Save dataframe 
+```{r}
+write_tsv(abtiter_selected.df, 
+          file = paste0(base_path_processed, "abtiter_batch_corrected.tsv"))
+
+write_tsv(abtiter_selected.df, 
+          file = paste0(base_path_pre_processed, "abtiter_batch_not_corrected.tsv"))
+```
+

@@ -1,0 +1,113 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+## Asemble clinical data and Raw AB titer data
+## Clinical data is extracted using codebase.R
+```{r}
+## Read Olink datasets
+olink_2020 <- readr::read_tsv(paste0(base_path_raw, "2020LD_olink.tsv")) %>%
+  dplyr::left_join(., clinical_data) %>%
+  dplyr::filter(Timepoint <= 120)
+
+olink_2021 <- readr::read_tsv(paste0(base_path_raw, "2021LD_olink.tsv")) %>%
+  dplyr::left_join(., clinical_data) %>%
+  filter(Timepoint <= 120)
+
+```
+## Identify Features with coefficient of variation > 30%
+#####
+```{r}
+olink_2020_CV <- olink_2020 %>%
+  filter(uniprot_id %in% unique(olink_2021$uniprot_id)) %>%
+  #filter(Timepoint == 0) %>%
+  group_by(uniprot_id) %>%
+     summarise(mean = mean(protein_expression), 
+               median = median(protein_expression), 
+               cv= cmstatr::cv(protein_expression, na.rm = T)) #%>%
+  #filter(cv >= 0.3)
+```
+
+
+```{r}
+olink_2021_CV <- olink_2021 %>%
+  filter(uniprot_id %in% unique(olink_2020$uniprot_id)) %>%
+  group_by(uniprot_id) %>%
+     summarise(cv= cmstatr::cv(protein_expression)) %>%
+  filter(cv >= 0.3)
+
+olink_2020_selected = olink_2020 
+
+olink_2021_selected = olink_2021 %>% 
+  filter(uniprot_id %in% olink_2021_CV$uniprot_id) %>%
+  filter(uniprot_id %in%  unique(olink_2020_selected$uniprot_id))
+
+olink_2020_selected <- olink_2020_selected %>%
+  filter(uniprot_id %in%  unique(olink_2021_selected$uniprot_id))
+
+olink_selected <- rbind(olink_2020_selected, olink_2021_selected)
+
+```
+
+## Identify batch effects
+```{r}
+olink_selected.df <- olink_selected %>%
+  dplyr::select(specimen_id, uniprot_id, protein_expression) %>%
+  pivot_wider(names_from = specimen_id, values_from = protein_expression) 
+
+olink_selected.matrix <-  olink_selected.df %>%
+  column_to_rownames("uniprot_id") %>%
+  as.matrix()
+
+clinical_data_selected = clinical_data %>%
+  filter(specimen_id %in% colnames(olink_selected.matrix))
+  
+batch = clinical_data_selected$dataset
+
+setwd("/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/scripts/batch_correction/batch_qc/olink/unprocessed")
+## Run BatcQC
+batchQC(olink_selected.matrix, 
+        batch= batch,
+        report_file="batchqc_report_olink_2020_2021.html", report_dir=".", 
+        report_option_binary="111111111",
+        view_report=FALSE, 
+        interactive=FALSE, 
+        batchqc_output=TRUE
+        )
+```
+
+### Run ComBat on Olink data
+```{r}
+olink_adjust<-ComBat(dat=olink_selected.matrix, 
+                     batch=batch)
+
+olink_adjust_df <- olink_adjust %>%
+  as.data.frame() %>%
+  rownames_to_column("uniprot_id")
+```
+
+```{r}
+setwd("/home/pramod/Documents/GitHub/gitlab/immunoprofiling-reproducibility/scripts/batch_correction/batch_qc/olink/batch_corrected")
+## Run BatcQC
+batchQC(olink_adjust, 
+        batch= batch,
+        report_file="batchqc_report_olink_2020_2021_batch_corrected.html", report_dir=".", 
+        report_option_binary="111111111",
+        view_report=FALSE, 
+        interactive=FALSE, 
+        batchqc_output=TRUE
+        )
+```
+
+## Save dataframe 
+```{r}
+write_tsv(olink_adjust_df, 
+          file = paste0(base_path_processed, "olink_batch_corrected.tsv"))
+
+write_tsv(olink_selected.df, 
+          file = paste0(base_path_pre_processed, "olink_batch_not_corrected.tsv"))
+```
+
+
